@@ -1,0 +1,22 @@
+﻿# Build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Input/Output data files - never commit these
+input.xlsx
+output.xlsx
+national_ids.txt
+last_page.txt
+*.html
+*.txt
+config.txt
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
