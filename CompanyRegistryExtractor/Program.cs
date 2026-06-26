@@ -29,17 +29,23 @@ namespace CompanyRegistryExtractor
             return sleep;
         }
 
-        static string GetSectionValue(string section)
+        static string GetValueByLabel(string html, string label)
         {
-            var parts = section.Split(new string[] { "L-Bold__POZoQ" }, StringSplitOptions.None);
-            if (parts.Length > 1)
-                return parts[1].Split('>')[1].Split('<')[0].Trim();
+            try
+            {
+                string pattern = Regex.Escape(label) + @".*?(?:L-Bold__POZoQ|lrxlmG__text__L-Bold)[^>]*>([^<]*)<";
+                var m = Regex.Match(html, pattern, RegexOptions.Singleline);
+                if (m.Success)
+                    return m.Groups[1].Value.Trim();
+            }
+            catch { }
             return "";
         }
 
         static void Main(string[] args)
         {
-            // Load config
+            Console.OutputEncoding = Encoding.UTF8;
+
             if (!File.Exists("config.txt"))
             {
                 Console.WriteLine("config.txt not found.");
@@ -304,61 +310,81 @@ namespace CompanyRegistryExtractor
 
                     try
                     {
-                        Console.Write("Processing " + national + " ... ");
+                        Console.WriteLine("\nProcessing: " + national);
                         driver.Navigate().GoToUrl(baseUrl + "/company/" + national + "/direct");
                         Thread.Sleep(GetUniqueSleep());
 
                         string html = driver.PageSource;
-                        var res = html.Split(new string[] { "rtl-192rpie" }, StringSplitOptions.None);
 
-                        var nameMatch = Regex.Match(html, @"rasmText_text__H5__Acc1F[^>]*>(.*?)</p>");
+                        var nameMatch = Regex.Match(html, @"(?:rasmText_text__H5__Acc1F|lrxlmG__text__H5)[^>]*>(.*?)</p>");
                         string companyName = nameMatch.Success ? nameMatch.Groups[1].Value.Trim() : "";
 
-                        string dateRaw = GetSectionValue(res[2]);
+                        string dateRaw = GetValueByLabel(html, "\u062a\u0627\u0631\u06cc\u062e \u062a\u0627\u0633\u06cc\u0633");
                         string date = Regex.Replace(dateRaw, @"\s*\(.*?\)", "").Trim();
 
-                        string status = GetSectionValue(res[3]);
-                        string companyType = GetSectionValue(res[4]);
-                        string registerNum = GetSectionValue(res[6]);
+                        string status = GetValueByLabel(html, "\u0648\u0636\u0639\u06cc\u062a \u0634\u0631\u06a9\u062a");
+                        string companyType = GetValueByLabel(html, "\u0646\u0648\u0639 \u0634\u0631\u06a9\u062a");
+                        string registerNum = GetValueByLabel(html, "\u0634\u0645\u0627\u0631\u0647 \u062b\u0628\u062a");
 
-                        string capitalRaw = GetSectionValue(res[9]);
+                        string capitalRaw = GetValueByLabel(html, "\u0633\u0631\u0645\u0627\u06cc\u0647 \u062b\u0628\u062a\u06cc");
                         string capital = Regex.Replace(capitalRaw, @"[^\d]", "");
+                        if (capital.Length > 15) capital = capital.Substring(0, 15);
 
                         var addrMatch = Regex.Match(html, @"aria-label=""کپی آدرس: ([^""]+)""");
-                        string address = "";
-                        if (addrMatch.Success)
-                            address = Regex.Replace(addrMatch.Groups[1].Value, @"\s+\d{10}\s*$", "").Trim();
+                        string address = addrMatch.Success
+                            ? Regex.Replace(addrMatch.Groups[1].Value, @"\s+\d{10}\s*$", "").Trim()
+                            : "";
 
-                        var actMatch = Regex.Match(html, @"دسته.های اصلی[^:]*:.*?normal;"">(.*?)</p>", RegexOptions.Singleline);
+                        var actMatch = Regex.Match(html, @"دسته.های اصلی[^:]*:.*?normal[;""][^>]*>(.*?)</p>", RegexOptions.Singleline);
                         string activity = actMatch.Success ? actMatch.Groups[1].Value.Trim() : "";
+
+                        if (string.IsNullOrWhiteSpace(companyName)) companyName = "-";
+                        if (string.IsNullOrWhiteSpace(date)) date = "-";
+                        if (string.IsNullOrWhiteSpace(status)) status = "-";
+                        if (string.IsNullOrWhiteSpace(companyType)) companyType = "-";
+                        if (string.IsNullOrWhiteSpace(registerNum)) registerNum = "-";
+                        if (string.IsNullOrWhiteSpace(capital)) capital = "-";
+                        if (string.IsNullOrWhiteSpace(address)) address = "-";
+                        if (string.IsNullOrWhiteSpace(activity)) activity = "-";
+
+                        Console.WriteLine("  Name    : " + companyName);
+                        Console.WriteLine("  Date    : " + date);
+                        Console.WriteLine("  Status  : " + status);
+                        Console.WriteLine("  Type    : " + companyType);
+                        Console.WriteLine("  RegNum  : " + registerNum);
+                        Console.WriteLine("  Capital : " + capital);
+                        Console.WriteLine("  Address : " + address);
+                        Console.WriteLine("  Activity: " + activity);
 
                         using (OleDbConnection Con = new OleDbConnection("Provider=Microsoft.ACE.OLEDB.12.0;Data Source=output.xlsx;Extended Properties=\"Excel 12.0;HDR=Yes;\""))
                         {
                             Con.Open();
                             OleDbCommand cmd2 = new OleDbCommand();
                             cmd2.Connection = Con;
-                            cmd2.CommandText = "insert into [Result$] ([NationalId],[CompanyName],[FoundDate],[Status],[CompanyType],[RegisterNum],[Capital],[Address],[Activity]) values ('"
-                                + national + "','"
-                                + companyName.Replace("'", "''") + "','"
-                                + date + "','"
-                                + status + "','"
-                                + companyType + "','"
-                                + registerNum + "','"
-                                + capital + "','"
-                                + address.Replace("'", "''") + "','"
-                                + activity + "')";
+                            cmd2.CommandText = "insert into [Result$] ([NationalId],[CompanyName],[FoundDate],[Status],[CompanyType],[RegisterNum],[Capital],[Address],[Activity]) values (?,?,?,?,?,?,?,?,?)";
+
+                            cmd2.Parameters.AddWithValue("?", national);
+                            cmd2.Parameters.AddWithValue("?", companyName);
+                            cmd2.Parameters.AddWithValue("?", date);
+                            cmd2.Parameters.AddWithValue("?", status);
+                            cmd2.Parameters.AddWithValue("?", companyType);
+                            cmd2.Parameters.AddWithValue("?", registerNum);
+                            cmd2.Parameters.AddWithValue("?", capital);
+                            cmd2.Parameters.AddWithValue("?", address);
+                            cmd2.Parameters.AddWithValue("?", activity);
+
                             cmd2.ExecuteNonQuery();
                             Con.Close();
                         }
 
                         doneIds.Add(national);
                         success++;
-                        Console.WriteLine("OK [" + (success + skipped) + "/" + ids.Count + "]");
+                        Console.WriteLine("  --> OK [" + (success + skipped) + "/" + ids.Count + "]");
                     }
                     catch (Exception e)
                     {
                         failed++;
-                        Console.WriteLine("FAILED - " + e.Message);
+                        Console.WriteLine("  --> FAILED: " + e.Message);
                     }
                 }
 
